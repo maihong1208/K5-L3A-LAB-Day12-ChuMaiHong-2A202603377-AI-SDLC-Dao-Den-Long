@@ -17,8 +17,6 @@
 | 4 | TICKET-04 (phát hành) | v1.3 | `phase-4` | `docs/proof/phase-4-evidence.md` + `bench.json`, `soak.json` |
 
 Mọi test ẩn Phase 1–3 vẫn hiệu lực: `python -m pytest tests/` → **40/40 pass**.
-Lưu ý: lịch sử checkout hiện gộp Phase 3 và 4 vào cùng một commit; không thể
-tạo tag phase riêng mà không có các commit mốc gốc.
 
 ## Cài đặt & chạy (tối đa 3 lệnh)
 
