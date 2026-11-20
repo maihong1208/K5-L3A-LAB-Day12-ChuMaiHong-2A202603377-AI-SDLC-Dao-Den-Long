@@ -13,8 +13,8 @@
 |-------|--------|----------|-----|-----------|
 | 1 | PRD-0 (1 màn chơi) | v1.0 | `phase-1` | `docs/proof/phase-1-evidence.md` (12 test pass) |
 | 2 | TICKET-02 (3 đêm) | v1.1 | `phase-2` | `docs/proof/phase-2-evidence.md` (26 test pass) |
-| 3 | TICKET-03 (đèn cạn dầu) | v1.2 | Chưa có trong checkout hiện tại | `docs/proof/phase-3-evidence.md` |
-| 4 | TICKET-04 (phát hành) | v1.3 | Chưa có trong checkout hiện tại | `docs/proof/phase-4-evidence.md` + `bench.json`, `soak.json` |
+| 3 | TICKET-03 (đèn cạn dầu) | v1.2 | `phase-3` | `docs/proof/phase-3-evidence.md` |
+| 4 | TICKET-04 (phát hành) | v1.3 | `phase-4` | `docs/proof/phase-4-evidence.md` + `bench.json`, `soak.json` |
 
 Mọi test ẩn Phase 1–3 vẫn hiệu lực: `python -m pytest tests/` → **40/40 pass**.
 Lưu ý: lịch sử checkout hiện gộp Phase 3 và 4 vào cùng một commit; không thể
