@@ -49,3 +49,9 @@ Thumbs.db
 *.app
 *.dmg
 *.zip
+
+# Runtime / local artifacts (không commit; bằng chứng bench/soak thì CÓ commit)
+data/                      # leaderboard runtime (top 10 của máy người chơi)
+docs/demo/_frames/         # PNG tạm khi sinh demo.mp4
+out.json
+.claude/                   # harness local (worktrees, settings)

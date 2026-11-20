@@ -147,6 +147,10 @@ class TestPhase1Headless(unittest.TestCase):
         self.assertGreaterEqual(len(lit), 1, f"Expected lantern_lit event, got: {events}")
 
     def test_all_lanterns_lit_wins(self):
+        # Ticket-03 (Contract v1.2) [THAY THẾ] "thắng khi tất cả đèn sáng".
+        # Giờ không thắng sớm: phải sống tới bình minh và có >= 60% đèn sáng.
+        # Test này cập nhật để kiểm chứng luật mới: thắp đủ đèn KHÔNG kết thúc
+        # Đêm; thắng (dawn_survived) chỉ khi hết giờ mà số đèn sáng đạt ngưỡng.
         scenario = {
             "lanterns": [
                 {"id": "L1", "pos": [0, 0, 1], "deposited": 0, "lit": False},
@@ -172,10 +176,20 @@ class TestPhase1Headless(unittest.TestCase):
                 {"tick": 8, "interact": True},
             ]
         }
-        rc, lines, _ = run_headless(seed=1, ticks=15, scenario=scenario, inputs=inputs)
+        # Hết Đêm chỉ cần 3/5 đèn sáng. Tạo 3 đèn sáng sẵn (không cộng
+        # successful_lights) và đặt time_left_s rất ngắn để kiểm tra bình minh.
+        scenario["lanterns"] = [
+            {"id": f"L{i}", "pos": [0, 0, i], "lit": i <= 3}
+            for i in range(1, 6)
+        ]
+        scenario["player"]["carried"] = 0
+        scenario["time_left_s"] = 1 / 60
+        rc, lines, _ = run_headless(seed=1, ticks=2, scenario=scenario)
         self.assertEqual(rc, 0)
         end = lines[-1]
         self.assertEqual(end["state"], "won")
+        game_over = [l for l in lines if l.get("name") == "game_over"]
+        self.assertEqual(game_over[-1]["data"]["reason"], "dawn_survived")
 
     def test_lantern_count_night1_is_5(self):
         rc, lines, _ = run_headless(seed=1, ticks=1)

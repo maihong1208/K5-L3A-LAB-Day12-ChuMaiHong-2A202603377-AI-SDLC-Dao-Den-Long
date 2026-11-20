@@ -38,3 +38,33 @@ Game 3D "Đảo Đèn Lồng" — giai đoạn chuẩn bị (CP0) và 4 phase ph
 
 Cách chạy headless Phase 1:
   python src/game_headless.py --seed <int> --night 1 --ticks <int> --out <file.jsonl>
+
+## Phase 2 (TICKET-02) — ĐÃ HOÀN THÀNH
+- 3 Đêm (5/6/7 đèn), dash, pulse chi phí, Bùa Gió, Gió Lạc, pause, nhảy+trọng lực.
+- Test: `tests/test_phase_2.py` (gộp với Phase 1). Bằng chứng: `docs/proof/phase-2-evidence.md`.
+
+## Phase 3 (TICKET-03) — ĐÃ HOÀN THÀNH
+- File hợp đồng: `game.contract.json` (Test Contract v1.2, nhiên liệu đèn)
+- Engine: `src/game_headless.py` (fuel hao/hút, châm dầu, drain, thắng bình minh)
+- Test: `tests/test_phase_3.py` (10 test). Bằng chứng: `docs/proof/phase-3-evidence.md`, `docs/proof/phase-3-headless-sample.jsonl`
+- ADR: `docs/notes/adr-phase-3-lantern-fuel.md`
+- Setting màu: `config/settings.json` + `src/settings_store.py`
+
+## Phase 4 (TICKET-04) — ĐÃ HOÀN THÀNH (v1.0.0)
+- GUI chơi được: `src/game_gui.py` + `src/scene_render.py` (pygame-ce).
+- Benchmark: `src/bench.py` → `bench.json`. Soak: `src/soak_test.py` → `soak.json`.
+- Bảng xếp hạng: `src/leaderboard.py` + `--export-leaderboard`. Accessibility: `src/settings_store.py`.
+- Video demo: `docs/demo/demo.mp4` (sinh bằng `docs/demo/make_demo.py`).
+- Test: `tests/test_phase_4.py`. Bằng chứng: `docs/proof/phase-4-evidence.md`. Retro: `docs/notes/retro-phase-4.md`.
+- Lệnh Phase 4:
+    python src/game_gui.py                 # chơi
+    python src/bench.py --seed 42 --duration 30 --out bench.json
+    python src/soak_test.py --seed 7 --nights 10 --out soak.json
+    python src/game_gui.py --export-leaderboard out.json
+
+## CẤU TRÚC SỬA ĐỔI (quan trọng cho agent sau)
+- `src/game_headless.py` = **source of truth** cho luật (headless, deterministic).
+  GUI (`game_gui.py`) CHỈ đọc/cập nhật state, không sửa luật.
+- Mọi thay đổi luật phải cập nhật: engine + `tests/` + `game.contract.json` + README/CHANGELOG.
+- Khi thêm chế độ đo (bench/soak): nhân vật/kẻ địch/hiệu ứng SÁNG TẠO THÊM phải tắt
+  hoặc không ảnh hưởng số đo (Ticket-04: mọi bài đo trên cùng cảnh chuẩn).

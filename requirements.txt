@@ -1,0 +1,4 @@
+# Cài đặt: pip install -r requirements.txt
+# Engine headless (Phase 1–3) chỉ dùng stdlib; các tuỳ chọn dưới cho Phase 4.
+pygame-ce>=2.5.8
+psutil>=6.0

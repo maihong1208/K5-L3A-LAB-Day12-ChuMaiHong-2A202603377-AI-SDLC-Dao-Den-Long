@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
-Headless engine cho game Đảo Đèn Lồng — Phase 2 (TICKET-02: Ba hòn đảo).
-Tuân thủ Test Contract v1.1: chạy không giao diện, xuất JSONL, hoàn toàn xác định (deterministic).
+Headless engine cho game Đảo Đèn Lồng — Phase 3 (TICKET-03: Đèn cạn dầu).
+Tuân thủ Test Contract v1.2: chạy không giao diện, xuất JSONL, hoàn toàn xác định (deterministic).
+Mô hình nhiên liệu: đèn hao/hút dầu, có thể châm/thắp lại; thắng bằng giữ đảo sáng
+đến bình minh (>= 60% đèn sáng), không còn thắng sớm.
 
 Cách chạy:
     python src/game_headless.py --seed 42 --night 1 --ticks 600 --out out.jsonl
@@ -25,9 +27,15 @@ import json
 import math
 import random
 import sys
+from pathlib import Path
+
+try:
+    from .settings_store import load_settings
+except ImportError:  # chạy trực tiếp: python src/game_headless.py
+    from settings_store import load_settings
 
 # ---------------------------------------------------------------------------
-# Tuning số chuẩn Phase 2 (phải khớp game.contract.json)
+# Tuning số chuẩn Phase 3 (Contract v1.2; phải khớp game.contract.json)
 # ---------------------------------------------------------------------------
 TUNING = {
     "player_speed": 6.0,
@@ -61,23 +69,46 @@ TUNING = {
     "shade_recoil_m": 2.0,
     "shade_recoil_ticks": 60,
     "shade_invuln_ticks": 90,
-    "night1_duration_s": 300,
-    "night2_duration_s": 330,
-    "night3_duration_s": 360,
+    # --- Phase 3 (Ticket-03, Contract v1.2) ---
+    "night1_duration_s": 240,
+    "night2_duration_s": 270,
+    "night3_duration_s": 300,
     "flames": 3,
     "charm_speed": 7.2,
     "charm_duration_ticks": 600,
     "charm_respawn_ticks": 2700,
+    # Nhiên liệu đèn (mô hình "đèn cạn dầu")
+    "fuel_max": 100,
+    "fuel_decay_per_s": 1.0,
+    "fuel_per_mote": 10,
+    "relight_cost": 5,
+    "win_ratio": 0.6,
+    "drain_per_s": 5,
+    "low_fuel_threshold": 30,
+    "drain_enter_m": 2.0,
+    "drain_leave_m": 2.0,
+    "drain_chase_m": 6.0,
+    "capacity_max": 20,
     "score": {
-        "per_mote_deposit": 10,
-        "per_lantern": 100,
+        "per_mote_deposit": 5,
+        "per_first_light": 100,
+        "per_relight": 40,
         "per_stun": 5,
-        "per_second_left_win": 2,
-        "per_flame_left_win": 50,
+        "per_stun_drain": 15,
+        "dawn_per_lantern_lit": 50,
+        "dawn_per_flame_left": 50,
     },
 }
 
 TICKS_PER_SECOND = 60
+
+# Nhiên liệu được lưu dạng nguyên đơn vị "1/60 fuel" để tránh sai số số thực;
+# chỉ quy đổi (round 1 chữ số) khi xuất snapshot/sự kiện.
+FUEL_MAX_60 = int(TUNING["fuel_max"]) * 60          # = 6000
+FUEL_DECAY_60_PER_TICK = int(TUNING["fuel_decay_per_s"])   # 1/60 fuel/tick = 1 đơn vị
+FUEL_DRAIN_60_PER_TICK = int(TUNING["drain_per_s"])        # 5/60 fuel/tick = 5 đơn vị
+FUEL_PER_MOTE_60 = int(TUNING["fuel_per_mote"]) * 60       # = 600 đơn vị/đom đóm
+LOW_FUEL_60 = int(TUNING["low_fuel_threshold"]) * 60       # = 1800
 
 
 # ---------------------------------------------------------------------------
@@ -96,7 +127,7 @@ def round3(v):
 
 
 # ---------------------------------------------------------------------------
-# Game state (Phase 2)
+# Game state (Phase 3)
 # ---------------------------------------------------------------------------
 class Game:
     def __init__(self, seed, night=1, scenario=None):
@@ -117,6 +148,7 @@ class Game:
         self.player_yaw = 0.0
         self.player_grounded = True
         self.player_carried = 0
+        self.successful_lights = 0
         self.player_flames = int(TUNING["flames"])
         self.invuln_ticks = 0
         self.dash_active = False
@@ -216,10 +248,63 @@ class Game:
                 "pos": [round3(v) for v in pos],
                 "lit": False,
                 "deposited": 0,
+                # Phase 3: nhiên liệu dạng nguyên (đơn vị 1/60 fuel)
+                "fuel_60": 0,
+                "ever_lit": False,
+                "relit_count": 0,
             })
         self.lanterns_by_id = {L["id"]: L for L in self.lanterns}
+        self._active_drain_ticks = {}        # shade_id -> ticks liên tục drain, phát event mỗi 60 tick
+        # Setting chỉ phục vụ GUI; không tham gia mô phỏng nên không ảnh hưởng JSONL.
+        self.colorblind_mode = load_settings().get("colorblind_mode", False)
 
     # ------------------------------------------------------------------
+    @staticmethod
+    def _fuel_display(fuel_60):
+        """Quy đổi fuel 1/60 sang số thực 1 chữ số cho JSON."""
+        return round(max(0, int(fuel_60)) / 60.0, 1)
+
+    def _capacity(self):
+        return min(TUNING["capacity_max"], TUNING["carry_capacity"] + 2 * self.successful_lights)
+
+    def _release_shades_from_safe_push(self, L):
+        """Khi đèn L đang sáng (fuel >= low_threshold), các Bóng Mực trong
+        vùng 6 m bị đẩy ra mép safe_radius trong tối đa safe_push_ticks tick
+        và không gây sát thương trong khoảng đó (giống khi đèn vừa thắp)."""
+        for S in self.shades:
+            if dist2d(S["pos"], L["pos"]) <= TUNING["drain_chase_m"]:
+                dx = S["pos"][0] - L["pos"][0]
+                dz = S["pos"][2] - L["pos"][2]
+                d = math.hypot(dx, dz)
+                S["safe_push_dir"] = [dx / d, dz / d] if d > 0 else [1.0, 0.0]
+                S["safe_push_lantern_id"] = L["id"]
+                S["safe_push_ticks"] = TUNING["safe_push_ticks"]
+                # Di chuyển ngay tại tick châm dầu để không thể gây hit trước
+                # khi timer safe-push bắt đầu ở tick tiếp theo.
+                S["pos"][0] = L["pos"][0] + S["safe_push_dir"][0] * TUNING["safe_radius"]
+                S["pos"][2] = L["pos"][2] + S["safe_push_dir"][1] * TUNING["safe_radius"]
+                if S["state"] == "drain":
+                    S["state"] = "wander"
+                    S["drain_lantern_id"] = None
+
+    def _new_shade(self, lid_suffix):
+        """Tạo Bóng Mực với đầy đủ trường (Phase 2 + drain/safe-push Phase 3)."""
+        self.shade_counter += 1
+        return {
+            "id": f"S{self.shade_counter}",
+            "pos": [0.0, 0.0, 0.0],
+            "state": "spawning",
+            "state_ticks_left": 60,
+            "recoil_dir": [0.0, 0.0],
+            "recoil_ticks_left": 0,
+            "drain_lantern_id": None,
+            "drain_progress_ticks": 0,
+            "safe_push_ticks": 0,
+            "safe_push_dir": [0.0, 0.0],
+            "safe_push_lantern_id": None,
+            "target_lantern_id": None,
+        }
+
     def _apply_scenario(self, scenario):
         if "player" in scenario:
             p = scenario["player"]
@@ -237,6 +322,10 @@ class Game:
                 self.pulse_cooldown_ticks = int(p["pulse_cd_ticks"])
             if "charm_ticks" in p:
                 self.charm_ticks = int(p["charm_ticks"])
+            if "successful_lights" in p:
+                # Đèn đặt sẵn bằng scenario không được tính vào successful_lights;
+                # scenario chỉ ghi nhận số lần thắp "đúng nghĩa" trước đó.
+                self.successful_lights = int(p["successful_lights"])
 
         if "lanterns" in scenario:
             for L in scenario["lanterns"]:
@@ -249,6 +338,17 @@ class Game:
                         target["lit"] = bool(L["lit"])
                     if "deposited" in L:
                         target["deposited"] = int(L["deposited"])
+                    if "ever_lit" in L:
+                        target["ever_lit"] = bool(L["ever_lit"])
+                    if "relit_count" in L:
+                        target["relit_count"] = int(L["relit_count"])
+                    if target["lit"]:
+                        # lit: true mà không có fuel -> mặc định đầy (100).
+                        target["fuel_60"] = int(round(float(L["fuel"]) * 60.0)) if "fuel" in L else FUEL_MAX_60
+                        target["ever_lit"] = True
+                    else:
+                        # Đèn tắt không có nhiên liệu; giữ ever_lit/relit_count từ scenario.
+                        target["fuel_60"] = 0
 
         if "motes" in scenario:
             self.motes = []
@@ -277,13 +377,20 @@ class Game:
             self.shades = []
             for s in scenario["shades"]:
                 self.shade_counter += 1
+                state = s.get("state", "wander")
                 self.shades.append({
                     "id": s.get("id", f"S{self.shade_counter}"),
                     "pos": [float(s["pos"][0]), float(s["pos"][1]), float(s["pos"][2])],
-                    "state": s.get("state", "wander"),
+                    "state": state,
                     "state_ticks_left": int(s.get("state_ticks_left", 0)),
                     "recoil_dir": [0.0, 0.0],
                     "recoil_ticks_left": 0,
+                    "drain_lantern_id": s.get("target_lantern_id"),
+                    "drain_progress_ticks": 0,
+                    "safe_push_ticks": 0,
+                    "safe_push_dir": [0.0, 0.0],
+                    "safe_push_lantern_id": None,
+                    "target_lantern_id": s.get("target_lantern_id"),
                 })
 
         if "drifters" in scenario:
@@ -338,7 +445,7 @@ class Game:
     # ------------------------------------------------------------------
     def step(self):
         """Chạy 1 tick (1/60 giây). Trả về danh sách sự kiện (events).
-        Thứ tự xử lý bắt buộc theo Test Contract v1.1."""
+        Thứ tự xử lý theo Test Contract v1.2; fuel được cập nhật ở bước 2."""
         events = []
         dt = 1.0 / TICKS_PER_SECOND
 
@@ -374,6 +481,11 @@ class Game:
             if self.dash_remaining_ticks <= 0:
                 self.dash_active = False
 
+        # Giảm bộ đếm đẩy ra vùng an toàn (Bóng Mực không gây sát thương trong khi đó)
+        for shade in self.shades:
+            if shade["safe_push_ticks"] > 0:
+                shade["safe_push_ticks"] -= 1
+
         # Giảm TTL đom đóm rơi
         for mote in self.motes[:]:
             if mote["kind"] == "dropped" and mote["ttl_s"] > 0:
@@ -387,7 +499,8 @@ class Game:
                 shade["state_ticks_left"] -= 1
                 if shade["state_ticks_left"] <= 0:
                     if shade["state"] == "stunned":
-                        shade["state"] = "chase"
+                        shade["state"] = "wander"
+                        shade["drain_lantern_id"] = None
                     elif shade["state"] == "recoil":
                         shade["state"] = "chase"
                     elif shade["state"] == "spawning":
@@ -406,6 +519,41 @@ class Game:
                 charm["respawn_ticks_left"] -= 1
                 if charm["respawn_ticks_left"] <= 0:
                     charm["available"] = True
+
+        # --- 2b. Phase 3: trừ nhiên liệu (hao + bị hút), đèn hết dầu thì tắt ---
+        active_drain_ids = set()
+        for L in self.lanterns:
+            if not L["lit"]:
+                continue
+            L["fuel_60"] -= FUEL_DECAY_60_PER_TICK
+            # Mỗi Bóng Mực drain trừ độc lập; event fuel_drain mỗi 60 tick/shade.
+            draining_here = [S for S in self.shades if S["state"] == "drain" and S["drain_lantern_id"] == L["id"]]
+            for shade in draining_here:
+                L["fuel_60"] -= FUEL_DRAIN_60_PER_TICK
+                self._active_drain_ticks[shade["id"]] = self._active_drain_ticks.get(shade["id"], 0) + 1
+                active_drain_ids.add(shade["id"])
+                if self._active_drain_ticks[shade["id"]] % 60 == 0:
+                    events.append({
+                        "tick": self.tick + 1,
+                        "name": "fuel_drain",
+                        "data": {
+                            "lantern_id": L["id"],
+                            "shade_id": shade["id"],
+                            "fuel": self._fuel_display(L["fuel_60"]),
+                        },
+                    })
+            if L["fuel_60"] <= 0:
+                L["fuel_60"] = 0
+                L["lit"] = False
+                L["deposited"] = 0
+                events.append({
+                    "tick": self.tick + 1,
+                    "name": "lantern_out",
+                    "data": {"lantern_id": L["id"]},
+                })
+        for shade_id in list(self._active_drain_ticks):
+            if shade_id not in active_drain_ids:
+                self._active_drain_ticks[shade_id] = 0
 
         # --- 3. Di chuyển Mây (nhảy, lướt, gió) ---
         jump_triggered = self.player_jump and not self._jump_prev
@@ -456,11 +604,11 @@ class Game:
 
         fell_off = self.player_pos[1] < -10.0
 
-        # --- 4. Nhặt đom đóm và bùa ---
+        # --- 4. Nhặt đom đóm và bùa (sức chứa động theo Phase 3) ---
         for mote in self.motes[:]:
             if dist2d(self.player_pos, mote["pos"]) <= TUNING["pickup_radius_xz"]:
                 if abs(self.player_pos[1] - mote["pos"][1]) <= TUNING["pickup_height_tolerance"]:
-                    if self.player_carried < TUNING["carry_capacity"]:
+                    if self.player_carried < self._capacity():
                         self.motes.remove(mote)
                         self.player_carried += 1
                         events.append({
@@ -481,45 +629,62 @@ class Game:
                     })
                     break
 
-        # --- 5. Tương tác với đèn (nạp ánh sáng) ---
+        # --- 5. Tương tác đèn: thắp / thắp lại / châm dầu ---
         interact_triggered = self.player_interact and not self._interact_prev
         self._interact_prev = self.player_interact
 
         if interact_triggered and self.player_carried > 0:
-            candidates = []
-            for L in self.lanterns:
-                if not L["lit"] and dist2d(self.player_pos, L["pos"]) <= TUNING["interact_radius"]:
-                    candidates.append(L)
+            candidates = [
+                L for L in self.lanterns
+                if dist2d(self.player_pos, L["pos"]) <= TUNING["interact_radius"]
+                and (not L["lit"] or L["fuel_60"] < FUEL_MAX_60)
+            ]
             if candidates:
                 candidates.sort(key=lambda L: (dist2d(self.player_pos, L["pos"]), L["id"]))
                 L = candidates[0]
-                needed = TUNING["lantern_cost"] - L["deposited"]
-                deposit_amount = min(self.player_carried, needed)
-                if deposit_amount > 0:
-                    L["deposited"] += deposit_amount
-                    self.player_carried -= deposit_amount
-                    events.append({
-                        "tick": self.tick + 1,
-                        "name": "deposit",
-                        "data": {
-                            "lantern_id": L["id"],
-                            "amount": deposit_amount,
-                            "deposited": L["deposited"],
-                        },
-                    })
-                    if L["deposited"] >= TUNING["lantern_cost"] and not L["lit"]:
-                        L["lit"] = True
+                if L["lit"]:
+                    # Châm dầu: dùng = min(đang mang, ceil((100 - fuel)/10))
+                    missing_60 = max(0, FUEL_MAX_60 - L["fuel_60"])
+                    used = min(self.player_carried, (missing_60 + FUEL_PER_MOTE_60 - 1) // FUEL_PER_MOTE_60)
+                    if used > 0:
+                        old_fuel_60 = L["fuel_60"]
+                        self.player_carried -= used
+                        L["fuel_60"] = min(FUEL_MAX_60, L["fuel_60"] + used * FUEL_PER_MOTE_60)
+                        self.score += used * int(TUNING["score"]["per_mote_deposit"])
                         events.append({
-                            "tick": self.tick + 1,
-                            "name": "lantern_lit",
-                            "data": {"lantern_id": L["id"]},
+                            "tick": self.tick + 1, "name": "refuel",
+                            "data": {"lantern_id": L["id"], "amount": used, "fuel": self._fuel_display(L["fuel_60"])},
                         })
-                        self.score += int(TUNING["score"]["per_lantern"])
+                        if old_fuel_60 < LOW_FUEL_60 <= L["fuel_60"]:
+                            self._release_shades_from_safe_push(L)
+                else:
+                    cost = TUNING["relight_cost"] if L["ever_lit"] else TUNING["lantern_cost"]
+                    used = min(self.player_carried, cost)
+                    if used >= cost:
+                        relight = bool(L["ever_lit"])
+                        self.player_carried -= used
+                        L["fuel_60"] = FUEL_MAX_60
+                        L["lit"] = True
+                        L["ever_lit"] = True
+                        L["deposited"] = 0
+                        if relight:
+                            L["relit_count"] += 1
+                            self.score += int(TUNING["score"]["per_relight"])
+                        else:
+                            self.score += int(TUNING["score"]["per_first_light"])
+                        self.score += used * int(TUNING["score"]["per_mote_deposit"])
+                        self.successful_lights += 1
+                        events.append({
+                            "tick": self.tick + 1, "name": "lantern_lit",
+                            "data": {"lantern_id": L["id"], "relight": relight},
+                        })
+                        self._release_shades_from_safe_push(L)
+                    # Chưa đủ đom thì không tiêu tốn và không phát sự kiện.
 
-        # --- 6. Cập nhật vùng an toàn ---
-        safe_lanterns = [L for L in self.lanterns if L["lit"]]
+        # --- 6. Cập nhật vùng an toàn (đèn fuel < 30 mất safe zone) ---
+        safe_lanterns = [L for L in self.lanterns if L["lit"] and L["fuel_60"] >= LOW_FUEL_60]
         for shade in self.shades:
-            if shade["state"] in ("stunned", "recoil"):
+            if shade["state"] in ("stunned", "recoil", "drain") or shade["safe_push_ticks"] > 0:
                 continue
             for L in safe_lanterns:
                 if dist2d(shade["pos"], L["pos"]) <= TUNING["safe_radius"]:
@@ -539,13 +704,17 @@ class Game:
             self.pulse_cooldown_ticks = int(TUNING["pulse_cooldown_s"] * TICKS_PER_SECOND)
             self.player_carried -= TUNING["pulse_cost"]
             stunned_ids = []
+            stun_score = 0
             for shade in self.shades:
                 if dist3d(self.player_pos, shade["pos"]) <= TUNING["pulse_radius"]:
+                    was_draining = shade["state"] == "drain"
                     if shade["state"] != "stunned":
                         shade["state"] = "stunned"
                         shade["state_ticks_left"] = TUNING["pulse_stun_ticks"]
                     else:
                         shade["state_ticks_left"] = TUNING["pulse_stun_ticks"]
+                    shade["drain_lantern_id"] = None
+                    stun_score += int(TUNING["score"]["per_stun_drain"] if was_draining else TUNING["score"]["per_stun"])
                     dx = shade["pos"][0] - self.player_pos[0]
                     dz = shade["pos"][2] - self.player_pos[2]
                     d = math.hypot(dx, dz)
@@ -561,13 +730,35 @@ class Game:
                     "name": "pulse",
                     "data": {"stunned_ids": stunned_ids},
                 })
-            self.score += len(stunned_ids) * int(TUNING["score"]["per_stun"])
+            self.score += stun_score
 
         # --- 8. Di chuyển Bóng Mực ---
         shade_speed = TUNING["shade_speed_night3"] if self.night == 3 else TUNING["shade_speed"]
         for shade in self.shades:
             if shade["state"] in ("stunned", "recoil"):
                 continue
+
+            # Đẩy ra mép vùng an toàn (do safe_push_ticks, không gây sát thương).
+            if shade["safe_push_ticks"] > 0:
+                L = self.lanterns_by_id.get(shade.get("safe_push_lantern_id"))
+                if L:
+                    dx, dz = shade["safe_push_dir"]
+                    shade["pos"][0] = L["pos"][0] + dx * TUNING["safe_radius"]
+                    shade["pos"][2] = L["pos"][2] + dz * TUNING["safe_radius"]
+                continue
+
+            # Trạng thái drain: duy trì trừ khi có điều kiện thoát.
+            if shade["state"] == "drain":
+                target = self.lanterns_by_id.get(shade["drain_lantern_id"])
+                player_near = dist2d(shade["pos"], self.player_pos) <= TUNING["drain_chase_m"]
+                if (target is None or not target["lit"] or target["fuel_60"] >= LOW_FUEL_60
+                        or dist2d(shade["pos"], target["pos"]) > TUNING["drain_leave_m"]
+                        or player_near):
+                    shade["state"] = "chase" if player_near else "wander"
+                    shade["drain_lantern_id"] = None
+                else:
+                    continue   # Đang hút: đứng yên, tick sau xử lý tiếp
+
             near_player = dist2d(shade["pos"], self.player_pos) <= TUNING["shade_detect_m"]
             if near_player:
                 shade["state"] = "chase"
@@ -583,10 +774,30 @@ class Game:
                     shade["pos"][0] += (dx / d) * step_len
                     shade["pos"][2] += (dz / d) * step_len
             elif shade["state"] == "wander":
-                angle = self.rng.uniform(0, 2 * math.pi)
-                step_len = shade_speed * 0.5 * dt
-                shade["pos"][0] += math.cos(angle) * step_len
-                shade["pos"][2] += math.sin(angle) * step_len
+                weak = [L for L in self.lanterns if L["lit"] and L["fuel_60"] < LOW_FUEL_60]
+                targets = weak or [L for L in self.lanterns if not L["lit"]]
+                target = min(targets, key=lambda L: (dist2d(shade["pos"], L["pos"]), L["id"])) if targets else None
+                shade["target_lantern_id"] = target["id"] if target else None
+                # Chỉ hút dầu (drain) với đèn SÁNG yếu (fuel < 30); đèn tắt chỉ
+                # được tiến lại gần như Phase 2, không có fuel để hút.
+                if target and target["lit"] and dist2d(shade["pos"], target["pos"]) <= TUNING["drain_enter_m"]:
+                    shade["state"] = "drain"
+                    shade["drain_lantern_id"] = target["id"]
+                    shade["drain_progress_ticks"] = 0
+                    continue
+                if target:
+                    dx = target["pos"][0] - shade["pos"][0]
+                    dz = target["pos"][2] - shade["pos"][2]
+                    d = math.hypot(dx, dz)
+                    if d > 0:
+                        step_len = shade_speed * 0.5 * dt
+                        shade["pos"][0] += (dx / d) * step_len
+                        shade["pos"][2] += (dz / d) * step_len
+                else:
+                    angle = self.rng.uniform(0, 2 * math.pi)
+                    step_len = shade_speed * 0.5 * dt
+                    shade["pos"][0] += math.cos(angle) * step_len
+                    shade["pos"][2] += math.sin(angle) * step_len
 
         # --- 9. Di chuyển Gió Lạc (Drifters) ---
         for drifter in self.drifters:
@@ -635,9 +846,9 @@ class Game:
                         "data": {"drifter_id": drifter["id"], "amount": stolen, "carried": self.player_carried},
                     })
 
-        # Bóng Mực chạm
+        # Bóng Mực chạm (drain/safe-push không gây sát thương)
         for shade in sorted(self.shades, key=lambda s: s["id"]):
-            if shade["state"] in ("stunned", "recoil"):
+            if shade["state"] in ("stunned", "recoil", "drain") or shade["safe_push_ticks"] > 0:
                 continue
             if dist2d(self.player_pos, shade["pos"]) <= TUNING["shade_hit_radius_xz"]:
                 if abs(self.player_pos[1] - shade["pos"][1]) <= TUNING["shade_hit_height_tolerance"]:
@@ -678,8 +889,6 @@ class Game:
                                 "dropped": dropped,
                             },
                         })
-                        if self.player_flames <= 0:
-                            self.state = "lost"
                         break
 
         # --- 11. Sinh đom đóm, Bóng Mực, Gió Lạc theo lịch ---
@@ -723,36 +932,16 @@ class Game:
                 if len(self.shades) < max_shades:
                     angle = self.rng.uniform(0, 2 * math.pi)
                     r = 37.0 if self.night == 1 else (26.0 if self.night == 2 else 43.0)
-                    self.shade_counter += 1
-                    self.shades.append({
-                        "id": f"S{self.shade_counter}",
-                        "pos": [
-                            round3(math.cos(angle) * r),
-                            0.0,
-                            round3(math.sin(angle) * r),
-                        ],
-                        "state": "spawning",
-                        "state_ticks_left": 60,
-                        "recoil_dir": [0.0, 0.0],
-                        "recoil_ticks_left": 0,
-                    })
+                    s = self._new_shade("")
+                    s["pos"] = [round3(math.cos(angle) * r), 0.0, round3(math.sin(angle) * r)]
+                    self.shades.append(s)
         elif self.tick > first_spawn and (self.tick - first_spawn) % spawn_interval == 0:
             if len(self.shades) < max_shades:
                 angle = self.rng.uniform(0, 2 * math.pi)
                 r = 37.0 if self.night == 1 else (26.0 if self.night == 2 else 43.0)
-                self.shade_counter += 1
-                self.shades.append({
-                    "id": f"S{self.shade_counter}",
-                    "pos": [
-                        round3(math.cos(angle) * r),
-                        0.0,
-                        round3(math.sin(angle) * r),
-                    ],
-                    "state": "spawning",
-                    "state_ticks_left": 60,
-                    "recoil_dir": [0.0, 0.0],
-                    "recoil_ticks_left": 0,
-                })
+                s = self._new_shade("")
+                s["pos"] = [round3(math.cos(angle) * r), 0.0, round3(math.sin(angle) * r)]
+                self.shades.append(s)
 
         # Sinh Gió Lạc: tick 1200, 2400, ...; tối đa 2
         if self.tick > 0 and self.tick % 1200 == 0:
@@ -773,38 +962,39 @@ class Game:
                     "remove_ticks_left": 0,
                 })
 
-        # --- 12. Xét thắng/thua ---
+        # --- 12. Xét thắng/thua sau mọi cập nhật của tick (bao gồm tick bình minh) ---
         if self.state == "playing":
+            result = None
+            reason = None
             if self.player_flames <= 0:
-                self.state = "lost"
-                events.append({
-                    "tick": self.tick + 1,
-                    "name": "game_over",
-                    "data": {"result": "lost", "reason": "no_flames"},
-                })
-            elif all(L["lit"] for L in self.lanterns):
-                self.state = "won"
-                seconds_left = max(0, int(self.time_left))
-                self.score += seconds_left * int(TUNING["score"]["per_second_left_win"])
-                self.score += self.player_flames * int(TUNING["score"]["per_flame_left_win"])
-                events.append({
-                    "tick": self.tick + 1,
-                    "name": "game_over",
-                    "data": {"result": "won", "reason": "all_lit"},
-                })
+                result, reason = "lost", "no_flames"
             elif self.time_left <= 0:
-                self.state = "lost"
+                lit_count = sum(1 for L in self.lanterns if L["lit"] and L["fuel_60"] > 0)
+                required = math.ceil(TUNING["win_ratio"] * len(self.lanterns))
+                if lit_count >= required:
+                    result, reason = "won", "dawn_survived"
+                    for L in self.lanterns:
+                        if L["lit"] and L["fuel_60"] > 0:
+                            # floor(fuel) = số đơn vị fuel nguyên (fuel_60 // 60),
+                            # tính theo 1/60 để tránh sai số số thực.
+                            self.score += int(TUNING["score"]["dawn_per_lantern_lit"])
+                            self.score += L["fuel_60"] // 60
+                    self.score += self.player_flames * int(TUNING["score"]["dawn_per_flame_left"])
+                else:
+                    result, reason = "lost", "dawn"
+            if result:
+                self.state = result
                 events.append({
                     "tick": self.tick + 1,
                     "name": "game_over",
-                    "data": {"result": "lost", "reason": "dawn"},
+                    "data": {"result": result, "reason": reason},
                 })
 
         self.tick += 1
         return events
     # ------------------------------------------------------------------
     def snapshot(self):
-        """Tạo ảnh chụp trạng thái (theo Test Contract v1.1 §E)."""
+        """Tạo ảnh chụp trạng thái (theo Test Contract v1.2 §E)."""
         return {
             "type": "snapshot",
             "tick": self.tick,
@@ -822,6 +1012,7 @@ class Game:
                 "vel": [round3(v) for v in self.player_vel],
                 "flames": self.player_flames,
                 "carried": self.player_carried,
+                "capacity": self._capacity(),
                 "grounded": self.player_grounded,
                 "invuln": self.invuln_ticks,
                 "dash_cd_s": round3(self.dash_cooldown_ticks / 60.0),
@@ -833,7 +1024,10 @@ class Game:
                     "id": L["id"],
                     "pos": [round3(v) for v in L["pos"]],
                     "lit": L["lit"],
+                    "fuel": self._fuel_display(L["fuel_60"]),
                     "deposited": L["deposited"],
+                    "ever_lit": L["ever_lit"],
+                    "relit_count": L["relit_count"],
                 }
                 for L in self.lanterns
             ],
@@ -842,6 +1036,7 @@ class Game:
                     "id": S["id"],
                     "pos": [round3(v) for v in S["pos"]],
                     "state": S["state"],
+                    "target_lantern_id": S.get("target_lantern_id"),
                 }
                 for S in self.shades
             ],
@@ -879,7 +1074,7 @@ class Game:
 # Điểm vào chính
 # ---------------------------------------------------------------------------
 def main():
-    parser = argparse.ArgumentParser(description="Đảo Đèn Lồng headless (Phase 2)")
+    parser = argparse.ArgumentParser(description="Đảo Đèn Lồng headless (Phase 3, Contract v1.2)")
     parser.add_argument("--seed", type=int, required=True, help="hạt giống ngẫu nhiên")
     parser.add_argument("--night", type=int, required=True, help="mã đêm (1, 2, 3)")
     parser.add_argument("--scenario", type=str, default=None, help="file scenario JSON")
@@ -891,7 +1086,7 @@ def main():
     args = parser.parse_args()
 
     if args.night not in (1, 2, 3):
-        print("Chỉ hỗ trợ night 1, 2, 3 ở Phase 2", file=sys.stderr)
+        print("Chỉ hỗ trợ night 1, 2, 3 ở Phase 3", file=sys.stderr)
         return 1
 
     scenario = None

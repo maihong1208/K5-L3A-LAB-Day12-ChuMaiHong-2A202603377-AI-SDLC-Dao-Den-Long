@@ -1,5 +1,5 @@
 {
-  "contract_version": "1.1",
+  "contract_version": "1.2",
   "team": "2A202603377-Chu Mai Hong",
   "build_cmd": "pip install -r requirements.txt || true",
   "run_cmd": "python src/game_gui.py",
@@ -8,6 +8,14 @@
     "player_speed": 6.0,
     "carry_capacity": 10,
     "lantern_cost": 10,
+    "fuel_max": 100,
+    "fuel_decay_per_s": 1.0,
+    "fuel_per_mote": 10,
+    "relight_cost": 5,
+    "win_ratio": 0.6,
+    "drain_per_s": 5,
+    "low_fuel_threshold": 30,
+    "capacity_max": 20,
     "lantern_count_night1": 5,
     "pickup_radius": 1.0,
     "pickup_height_tolerance": 1.5,
@@ -29,9 +37,9 @@
     "shade_recoil_m": 2.0,
     "shade_recoil_ticks": 60,
     "shade_invuln_ticks": 90,
-    "night1_duration_s": 300,
-    "night2_duration_s": 330,
-    "night3_duration_s": 360,
+    "night1_duration_s": 240,
+    "night2_duration_s": 270,
+    "night3_duration_s": 300,
     "flames": 3,
     "dash_speed": 14.0,
     "dash_duration_s": 0.2,
@@ -40,11 +48,13 @@
     "charm_duration_ticks": 600,
     "charm_respawn_ticks": 2700,
     "score": {
-      "per_mote_deposit": 10,
-      "per_lantern": 100,
+      "per_mote_deposit": 5,
+      "per_first_light": 100,
+      "per_relight": 40,
       "per_stun": 5,
-      "per_second_left_win": 2,
-      "per_flame_left_win": 50
+      "per_stun_drain": 15,
+      "dawn_per_lantern_lit": 50,
+      "dawn_per_flame_left": 50
     }
   }
 }

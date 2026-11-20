@@ -153,7 +153,9 @@ class TestPhase2Headless(unittest.TestCase):
         lit = [e for e in events if e["name"] == "lantern_lit"]
         self.assertGreaterEqual(len(lit), 1, f"Expected lantern_lit event, got: {events}")
 
-    def test_all_lanterns_lit_wins(self):
+    def test_all_lanterns_lit_does_not_win_early(self):
+        # Ticket-03 replaces the Phase 2 early-win rule. All lit lanterns must
+        # remain in play until dawn; this short run must still be playing.
         scenario = {
             "lanterns": [
                 {"id": "L1", "pos": [0, 0, 1], "deposited": 0, "lit": False},
@@ -179,8 +181,7 @@ class TestPhase2Headless(unittest.TestCase):
         }
         rc, lines, _ = run_headless(seed=1, night=1, ticks=15, scenario=scenario, inputs=inputs)
         self.assertEqual(rc, 0)
-        end = lines[-1]
-        self.assertEqual(end["state"], "won")
+        self.assertEqual(lines[-1]["state"], "playing")
 
     def test_dash_activates(self):
         inputs = {
