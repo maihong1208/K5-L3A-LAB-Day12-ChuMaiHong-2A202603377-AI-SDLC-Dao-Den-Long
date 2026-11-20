@@ -29,6 +29,7 @@ PROCESS_START = time.perf_counter()
 import pygame
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from benchmark_stats import summarize_frame_times  # noqa: E402
 from game_headless import Game, TUNING, dist2d  # noqa: E402
 from scene_render import Renderer, Camera, SKY, GROUND, FOV_DEG  # noqa: E402
 import settings_store  # noqa: E402
@@ -149,24 +150,14 @@ def run_benchmark(args):
         if cur is not None:
             peak_mb = max(peak_mb, cur)
 
-    # ---- thống kê từ các dt_i trong khoảng đo ----
-    n = len(dt_ms_list)
-    total_ms = sum(dt_ms_list)
-    avg_fps = (1000.0 * n / total_ms) if n and total_ms > 0 else 0.0
-    k = max(1, math.ceil(0.01 * n)) if n else 1
-    largest = sorted(dt_ms_list, reverse=True)[:k] if n else []
-    p1_low_fps = (1000.0 / (sum(largest) / len(largest))) if largest else 0.0
-    p95 = 0.0
-    if n:
-        ordered = sorted(dt_ms_list)
-        p95 = ordered[min(n - 1, int(0.95 * (n - 1)))]
+    stats = summarize_frame_times(dt_ms_list)
 
     result = {
         "contract_version": "1.3",
-        "avg_fps": round(avg_fps, 1),
-        "p1_low_fps": round(p1_low_fps, 1),
-        "frame_ms_p95": round(p95, 1),
-        "frames": n,
+        "avg_fps": round(stats["avg_fps"], 1),
+        "p1_low_fps": round(stats["p1_low_fps"], 1),
+        "frame_ms_p95": round(stats["frame_ms_p95"], 1),
+        "frames": stats["frames"],
         "load_ms": int(round(load_ms)) if load_ms is not None else 0,
         "peak_mem_mb": int(round(peak_mb)) if peak_mb is not None else None,
         "vsync_off": vsync_off,

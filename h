@@ -1,0 +1,11 @@
+[33m80cdf12[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m phase-3 and phas-4
+[33m731261e[m[33m ([m[1;33mtag: [m[1;33mphase-2[m[33m)[m feat(phase-2): ticket-02/test contract v1.1 (3 dem, dash, charm, drifter), 26 test pass, evidence deterministic
+[33mcb901ed[m[33m ([m[1;33mtag: [m[1;33mphase-1[m[33m, [m[1;32mworktree-agent-ac68a6f1a4fd88af8[m[33m, [m[1;32mworktree-agent-a027e326c2c4c2efa[m[33m)[m feat(phase-1): hoan thanh PRD-0, engine headless, test contract v1.0, 12 test pass
+[33m9818fc1[m Encourage partial creative freedom; score creativity within rubric F
+[33m888fb83[m Phase 4 release moved to 2h30; Phase 3 shortened to 30 minutes
+[33m349cf67[m Add 4-hour lab schedule (phase release at 0h/1h/2h/3h, end at 4h)
+[33m12f4919[m Add GUIDE, CHECKPOINTS, SUBMISSION, RULES, RUBRIC; link from README
+[33m7be55f4[m README: remove emoji icons
+[33m9076ce0[m README: keep SDLC as short hints; add token-quota and meet-requirements reminders
+[33m2f5ae09[m README: put evaluation, proof and verification at the center; drop clarify rule section
+[33mef569af[m Add Day 12 AI SDLC lab README

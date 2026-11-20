@@ -1,3 +1,17 @@
 {
-  "colorblind_mode": false
+  "colorblind_mode": false,
+  "reduce_motion": false,
+  "subtitles": true,
+  "large_text": false,
+  "keybinds": {
+    "up": "w",
+    "down": "s",
+    "left": "a",
+    "right": "d",
+    "jump": "space",
+    "dash": "shift",
+    "interact": "e",
+    "pulse": "q",
+    "pause": "p"
+  }
 }

@@ -4,10 +4,14 @@ Kiểm tra: bảng xếp hạng (top 10, tên, thứ tự), đổi phím + phát
 + khôi phục mặc định, cỡ chữ UI, và schema của bench/soak (không cần chạy
 thật các lệnh dài — chỉ kiểm tra hàm sinh/thống kê + cấu trúc output).
 """
-import math
+import json
 import unittest
+from pathlib import Path
 
 from src import leaderboard, settings_store
+from src.benchmark_stats import summarize_frame_times
+from src.game_gui import LanternGame, scancode_for
+from src.game_headless import Game
 from src.settings_store import DEFAULT_KEYBINDS, ACTIONS
 
 
@@ -79,22 +83,86 @@ class TestSettings(unittest.TestCase):
         self.assertEqual(settings_store.ui_font_size({"large_text": True}), 22)  # 18*1.25
 
 
+class TestGuiInput(unittest.TestCase):
+    def setUp(self):
+        self.gui = LanternGame.__new__(LanternGame)
+        self.gui.settings = settings_store._defaults()
+        self.gui.current = Game(1, 1, {
+            "player": {"pos": [0, 0, 25], "carried": 15},
+            "lanterns": [{"id": "L1", "pos": [0, 0, 25]}],
+        })
+        self.keys = [False] * 512
+
+    def test_movement_uses_pygame_keycodes(self):
+        self.keys[scancode_for("w")] = True
+        frame = self.gui.read_frame(self.keys, {})
+        self.assertEqual(frame["move"], [0.0, 1.0])
+
+    def test_interaction_edge_resets_so_next_press_works(self):
+        first = self.gui.read_frame(self.keys, {"interact": True})
+        self.gui.current.apply_input(first)
+        first_events = self.gui.current.step()
+        self.assertIn("lantern_lit", [event["name"] for event in first_events])
+
+        released = self.gui.read_frame(self.keys, {})
+        self.assertFalse(released["interact"])
+        self.gui.current.apply_input(released)
+        self.gui.current.step()
+
+        second = self.gui.read_frame(self.keys, {"interact": True})
+        self.gui.current.apply_input(second)
+        second_events = self.gui.current.step()
+        self.assertIn("refuel", [event["name"] for event in second_events])
+
+    def test_pause_edge_toggles_and_release_does_not_resume(self):
+        pause = self.gui.read_frame(self.keys, {"pause": True})
+        self.gui.current.apply_input(pause)
+        self.gui.current.step()
+        self.assertTrue(self.gui.current.paused)
+
+        released = self.gui.read_frame(self.keys, {})
+        self.gui.current.apply_input(released)
+        self.gui.current.step()
+        self.assertTrue(self.gui.current.paused)
+
+        resume = self.gui.read_frame(self.keys, {"pause": True})
+        self.gui.current.apply_input(resume)
+        self.gui.current.step()
+        self.assertFalse(self.gui.current.paused)
+
+
 class TestBenchSoakStats(unittest.TestCase):
-    """Kiểm tra công thức thống kê (độc lập, không chạy lệnh 30s thật)."""
+    """Kiểm tra thống kê production và contract mà không chạy benchmark dài."""
 
     def test_p1_low_fps_formula(self):
-        # Mô phỏng N=1000 khung, dt đồng đều 16ms -> p1_low = avg_fps = ~62.5.
-        n, dt = 1000, 16.0
-        k = max(1, math.ceil(0.01 * n))
-        largest = [dt] * k
-        p1 = 1000.0 / (sum(largest) / len(largest))
-        self.assertAlmostEqual(p1, 62.5, places=2)
+        stats = summarize_frame_times([16.0] * 1000)
+        self.assertAlmostEqual(stats["p1_low_fps"], 62.5, places=2)
+        self.assertAlmostEqual(stats["avg_fps"], 62.5, places=2)
+        self.assertEqual(stats["frames"], 1000)
 
     def test_p95_formula(self):
-        dts = [float(i) for i in range(1, 101)]  # 1..100 ms
-        ordered = sorted(dts)
-        p95 = ordered[min(len(ordered) - 1, int(0.95 * (len(ordered) - 1)))]
-        self.assertEqual(p95, 95.0)
+        stats = summarize_frame_times([float(i) for i in range(1, 101)])
+        self.assertEqual(stats["frame_ms_p95"], 95.0)
+
+    def test_empty_benchmark_has_zero_metrics(self):
+        self.assertEqual(
+            summarize_frame_times([]),
+            {
+                "avg_fps": 0.0,
+                "p1_low_fps": 0.0,
+                "frame_ms_p95": 0.0,
+                "frames": 0,
+            },
+        )
+
+    def test_contract_matches_phase_4_commands_and_schema(self):
+        contract_path = Path(__file__).resolve().parents[1] / "game.contract.json"
+        with contract_path.open(encoding="utf-8") as contract_file:
+            contract = json.load(contract_file)
+
+        self.assertEqual(contract["contract_version"], "1.3")
+        for command in ("bench_cmd", "soak_cmd", "export_leaderboard_cmd"):
+            self.assertTrue(contract[command].startswith("python src/"))
 
 
 if __name__ == "__main__":

@@ -3,7 +3,9 @@
 > Game góc nhìn thứ ba 3D: người giữ đèn nhỏ tuổi gom đom đóm để thắp và **nuôi** các Đèn Lồng Lớn, né Bóng Mực trong sương đen, và giữ đảo sáng đến bình minh.
 > Được phát triển theo AI SDLC: mỗi phase có ticket, giả định, kế hoạch, engine headless + test, bằng chứng, tag `phase-N`.
 
-🎥 **Video demo:** [`docs/demo/demo.mp4`](docs/demo/demo.mp4) (dưới 5 phút, sinh tự động bằng ffmpeg từ chế độ benchmark).
+🎥 **Video demo:** [`docs/demo/demo.mp4`](docs/demo/demo.mp4). Khi nộp, video cần có đoạn chơi trực tiếp và bằng chứng chạy test/benchmark; hãy thay clip mẫu hiện tại bằng bản quay màn hình thật.
+
+![Ảnh game Đảo Đèn Lồng](docs/demo/gameplay.png)
 
 ## ✅ Đạt được (bản phát hành v1.0.0)
 
@@ -11,10 +13,12 @@
 |-------|--------|----------|-----|-----------|
 | 1 | PRD-0 (1 màn chơi) | v1.0 | `phase-1` | `docs/proof/phase-1-evidence.md` (12 test pass) |
 | 2 | TICKET-02 (3 đêm) | v1.1 | `phase-2` | `docs/proof/phase-2-evidence.md` (26 test pass) |
-| 3 | TICKET-03 (đèn cạn dầu) | v1.2 | `phase-3` | `docs/proof/phase-3-evidence.md` (40 test pass) |
-| 4 | TICKET-04 (phát hành) | v1.3 | `phase-4` | `docs/proof/phase-4-evidence.md` + `bench.json`, `soak.json` |
+| 3 | TICKET-03 (đèn cạn dầu) | v1.2 | Chưa có trong checkout hiện tại | `docs/proof/phase-3-evidence.md` |
+| 4 | TICKET-04 (phát hành) | v1.3 | Chưa có trong checkout hiện tại | `docs/proof/phase-4-evidence.md` + `bench.json`, `soak.json` |
 
 Mọi test ẩn Phase 1–3 vẫn hiệu lực: `python -m pytest tests/` → **40/40 pass**.
+Lưu ý: lịch sử checkout hiện gộp Phase 3 và 4 vào cùng một commit; không thể
+tạo tag phase riêng mà không có các commit mốc gốc.
 
 ## Cài đặt & chạy (tối đa 3 lệnh)
 
@@ -26,9 +30,13 @@ cd K5-L3-LAB-Day12-ChuMaiHong-2A202603377-AI-SDLC-Dao-Den-Long
 # 2. Cài đặt phụ thuộc
 pip install -r requirements.txt
 
-# 3. Chơi game (GUI, cửa sổ 1280×720)
+# 3. Mở menu game (GUI, cửa sổ 1280×720)
 python src/game_gui.py
 ```
+
+Trong menu, chọn **Bắt đầu hành trình** để chơi, **Cài đặt & trợ năng** để đổi
+phím/màu/cỡ chữ, hoặc **Bảng xếp hạng** để xem điểm đã lưu. Sau khi kết thúc
+Đêm 3 hoặc thua, có thể nhập tên và chơi lại từ menu.
 
 Chế độ không đồ hoạ (CP0): `python src/hello_headless.py`.
 
@@ -56,10 +64,18 @@ Mọi hành động trên có thể **đổi phím** trong menu Settings; hệ t
 hiện và cảnh báo phím trùng**, có nút **khôi phục mặc định**
 (`src/settings_store.py::reset_keybinds`).
 
+## Cách tính điểm
+
+- Nạp mỗi đom đóm vào đèn: **+5**; thắp đèn lần đầu: **+100**; thắp lại: **+40**.
+- Tỏa sáng trúng Bóng Mực: **+5 mỗi con**, hoặc **+15** nếu đang hút dầu.
+- Thắng tới bình minh: **+50 + phần dầu còn lại (lấy phần nguyên)** cho mỗi đèn
+  đang sáng và **+50 mỗi ngọn lửa còn lại**. Không có thưởng thời gian.
+- Sau mỗi đêm thắng, điểm được cộng vào tổng hành trình; thua kết thúc hành trình.
+
 ## Cách chạy test
 
 ```bash
-python -m pytest tests/          # 40 test, ~3 s
+python -m pytest tests/          # 55 test
 # hoặc:
 python -m unittest discover tests
 ```
