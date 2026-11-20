@@ -16,7 +16,7 @@
 | 3 | TICKET-03 (đèn cạn dầu) | v1.2 | `phase-3` | `docs/proof/phase-3-evidence.md` |
 | 4 | TICKET-04 (phát hành) | v1.3 | `phase-4` | `docs/proof/phase-4-evidence.md` + `bench.json`, `soak.json` |
 
-Mọi test ẩn Phase 1–3 vẫn hiệu lực: `python -m pytest tests/` → **40/40 pass**.
+Mọi test ẩn Phase 1–3 vẫn hiệu lực: `python -m pytest tests/` → **55/55 pass**.
 
 ## Cài đặt & chạy (tối đa 3 lệnh)
 
