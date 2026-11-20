@@ -17,8 +17,10 @@ python src/hello_headless.py
 python -m pytest tests/
 ```
 
-## Điều khiển
-- Chưa xác định (cập nhật sau khi đọc PRD-0 Phase 1 và chọn engine).
+## Điều khiển (mapping input headless)
+- Di chuyển: WASD / phím mũi tên; hướng theo camera (`cam_yaw_deg`).
+- `E`: tương tác (nhặt đom đóm / nạp đèn); `Space`: nhảy; `Shift`: lướt; `Q`: tỏa sáng; `P`: tạm dừng.
+- Phase 2 có engine headless và input contract; GUI chưa có (dự kiến Phase 4).
 
 ## Chế độ headless & Test Contract
 - `python src/hello_headless.py` in ra trạng thái JSON (không cần cửa sổ đồ họa).
@@ -43,6 +45,12 @@ python -m pytest tests/
 - `docs/notes/test-contract-phase-1.md`: Test Contract Phase 1 (v1.0).
 - `docs/proof/phase-1-evidence.md`: bằng chứng Phase 1 (12/12 test pass).
 - `docs/proof/phase-1-headless-sample.jsonl`: mẫu đầu ra headless.
+- `docs/notes/assumptions-phase-2.md`: giả định Phase 2.
+- `docs/notes/plan-phase-2.md`: kế hoạch Phase 2.
+- `docs/notes/test-contract-phase-2.md`: Test Contract Phase 2 (v1.1).
+- `docs/notes/ai-log-phase-2.md`: nhật ký AI + retro Phase 2.
+- `docs/proof/phase-2-evidence.md`: bằng chứng Phase 2 (26 test pass).
+- `docs/proof/phase-2-headless-sample.jsonl`: mẫu JSONL headless Phase 2.
 
 ## CREDITS & LICENSE
 - Xem `CREDITS.md` và `LICENSE`.

@@ -11,7 +11,7 @@ import tempfile
 import unittest
 
 HEADLESS = [sys.executable, "src/game_headless.py"]
-CWD = "D:/Python/VinAI/Lab12_L3A/dao-den-long-starter"
+CWD = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def run_headless(seed, ticks, scenario=None, inputs=None, snapshot_every=10):
@@ -71,11 +71,14 @@ class TestPhase1Headless(unittest.TestCase):
         self.assertEqual(lines1, lines2)
 
     def test_snapshot_has_required_fields(self):
+        # Cập nhật theo Test Contract v1.1 (Phase 2): snapshot không còn field
+        # "motes_active" (v1.0), thay bằng "motes" và các entity mới
+        # (drifters, charms, wind).
         rc, lines, _ = run_headless(seed=1, ticks=60)
         self.assertEqual(rc, 0)
         snap = lines[0]
         for field in ("type", "tick", "sim_tick", "state", "time_left_s", "score",
-                      "player", "lanterns", "shades", "motes_active"):
+                      "player", "lanterns", "shades", "motes", "drifters", "charms"):
             self.assertIn(field, snap)
         self.assertIn("pos", snap["player"])
         self.assertIn("flames", snap["player"])
@@ -128,7 +131,8 @@ class TestPhase1Headless(unittest.TestCase):
 
     def test_deposit_and_light_lantern(self):
         scenario = {
-            "player": {"pos": [0, 0, 25], "carried": 1, "flames": 3},
+            # Contract v1.1 tăng lantern_cost từ 1 lên 10.
+            "player": {"pos": [0, 0, 25], "carried": 10, "flames": 3},
             "lanterns": [{"id": "L1", "pos": [0, 0, 25], "deposited": 0}],
         }
         inputs = {
@@ -151,7 +155,8 @@ class TestPhase1Headless(unittest.TestCase):
                 {"id": "L4", "pos": [0, 0, 4], "deposited": 0, "lit": False},
                 {"id": "L5", "pos": [0, 0, 5], "deposited": 0, "lit": False},
             ],
-            "player": {"pos": [0, 0, 3], "carried": 5, "flames": 3},
+            # Contract v1.1: năm đèn, mỗi đèn cần 10 motes.
+            "player": {"pos": [0, 0, 3], "carried": 50, "flames": 3},
         }
         # Cần interact 5 lần (1 cho mỗi đèn), mỗi lần phải bật/tắt (edge-triggered)
         inputs = {
