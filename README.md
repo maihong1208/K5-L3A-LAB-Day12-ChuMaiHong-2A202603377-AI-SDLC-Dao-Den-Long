@@ -22,8 +22,8 @@ Mọi test ẩn Phase 1–3 vẫn hiệu lực: `python -m pytest tests/` → **
 
 ```bash
 # 1. Clone repo
-git clone https://github.com/maihong1208/K5-L3-LAB-Day12-ChuMaiHong-2A202603377-AI-SDLC-Dao-Den-Long.git
-cd K5-L3-LAB-Day12-ChuMaiHong-2A202603377-AI-SDLC-Dao-Den-Long
+git clone https://github.com/maihong1208/K5-L3A-LAB-Day12-ChuMaiHong-2A202603377-AI-SDLC-Dao-Den-Long.git
+cd K5-L3A-LAB-Day12-ChuMaiHong-2A202603377-AI-SDLC-Dao-Den-Long
 
 # 2. Cài đặt phụ thuộc
 pip install -r requirements.txt
